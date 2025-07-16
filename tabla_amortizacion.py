@@ -44,7 +44,7 @@ def tabla_amortizacion(pago, tasa, monto, pagos):
 # Inicializaciones
 st.session_state.tabla=None
 
-st.set_page_config(page_title="Calculadora de Crédito", layout="centered")
+
 st.title("💰 Tabla de amortización")
 
 st.markdown("#### Introduce los datos del crédito:")
@@ -74,16 +74,28 @@ if submitted:
     st.write("")
     st.markdown("---")
     st.markdown("### 🧾 Tabla de amortización")
-    tabla = st.session_state.tabla
-    st.dataframe(tabla, use_container_width=True,hide_index=True)
+    df_display = st.session_state.tabla.copy()
+    # Formateo de columnas
+    df_display["Mes"] = df_display["Mes"].astype(int)  # Mes como entero sin decimales
+    df_display["Pago"] = df_display["Pago"].map("${:,.2f}".format)  # Formato monetario
+    df_display["Interés"] = df_display["Interés"].map("${:,.2f}".format)  # Formato monetario
+    df_display["Abono a capital"] = df_display["Abono a capital"].map("${:,.2f}".format)  # Formato monetario
+    df_display["Saldo restante"] = df_display["Saldo restante"].map("${:,.2f}".format)  # Formato monetario
+
+
+    st.dataframe(df_display, use_container_width=True,hide_index=True)
 
     st.write("")
     st.markdown("---")
     st.markdown("### $ Totales")
+    tabla = st.session_state.tabla.copy()
     df_totales=pd.DataFrame({
         'Total monto a pagar': [tabla['Pago'].sum()],
         'Total interés a pagar': [tabla['Interés'].sum()]
     })
+
+    df_totales['Total monto a pagar'] = df_totales['Total monto a pagar'].map("${:,.2f}".format)
+    df_totales['Total interés a pagar'] = df_totales['Total interés a pagar'].map("${:,.2f}".format)
 
     st.dataframe(df_totales, use_container_width=True,hide_index=True)
 

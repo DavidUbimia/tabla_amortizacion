@@ -114,6 +114,8 @@ if len(st.session_state.creditos) > 0:
     
     # Formatear columnas
     df_display = df.copy()
+    df_display['Pago'] = df_display['Pago'].map("${:,.2f}".format)
+    df_display['Monto del crédito'] = df_display['Monto del crédito'].map("${:,.2f}".format)
     df_display['Tasa mensual'] = df_display['Tasa mensual'].apply(lambda x: f"{x:.2%}")
     df_display['Tasa anual nominal'] = df_display['Tasa anual nominal'].apply(lambda x: f"{x:.2%}")
     df_display['Tasa anual efectiva'] = df_display['Tasa anual efectiva'].apply(lambda x: f"{x:.2%}")
