@@ -14,7 +14,13 @@ def tabla_amortizacion(pago, tasa, monto, pagos):
     tasa_mensual = tasa / 100 / 12
     saldo = monto
 
-    tabla = []
+    tabla = [{
+            "Mes": 0,
+            "Pago": 0,
+            "Interés": 0,
+            "Abono a capital": 0,
+            "Saldo restante": round(max(saldo, 0), 2)
+        }]
 
     for mes in range(1, pagos + 1):
         interes = saldo * tasa_mensual
@@ -33,6 +39,11 @@ def tabla_amortizacion(pago, tasa, monto, pagos):
 
 
 
+
+
+# Inicializaciones
+st.session_state.tabla=None
+
 st.set_page_config(page_title="Calculadora de Crédito", layout="centered")
 st.title("💰 Tabla de amortización")
 
@@ -40,7 +51,7 @@ st.markdown("#### Introduce los datos del crédito:")
 
 # Formulario
 with st.form("form_credito"):
-    tasa_input = st.number_input("Tasa de interés anual (%)", min_value=0.0, step=0.1, value=10.0, format="%.2f")
+    tasa_input = st.number_input("Tasa de interés anual (% Nominal)", min_value=0.0, step=0.1, value=10.0, format="%.2f")
     monto_input = st.number_input("Monto del crédito ($)", min_value=0.0, step=100.0, value=10000.0, format="%.2f")
     pagos_input = st.number_input("Número de pagos (meses)", min_value=1, step=12, value=12)
 
@@ -49,19 +60,31 @@ with st.form("form_credito"):
 # Resultado
 if submitted:
     pago = calcular_pago_mensual(tasa_input, monto_input, pagos_input)
-    tabla = tabla_amortizacion(pago, tasa_input, monto_input, pagos_input)
+    st.session_state.tabla = tabla_amortizacion(pago, tasa_input, monto_input, pagos_input)
 
     st.markdown("---")
-    st.subheader("📊 Resultado del Cálculo")
+    st.subheader("📊 Estimación pago mensual")
     st.write(f"**Tasa anual:** {tasa_input:.2f}%")
     st.write(f"**Monto del crédito:** ${monto_input:,.2f}")
     st.write(f"**Número de pagos:** {pagos_input} meses")
     st.success(f"💸 El pago mensual estimado es: **${pago:,.2f}**")
 
+
+
     st.write("")
     st.markdown("---")
     st.markdown("### 🧾 Tabla de amortización")
+    tabla = st.session_state.tabla
     st.dataframe(tabla, use_container_width=True,hide_index=True)
 
+    st.write("")
+    st.markdown("---")
+    st.markdown("### $ Totales")
+    df_totales=pd.DataFrame({
+        'Total monto a pagar': [tabla['Pago'].sum()],
+        'Total interés a pagar': [tabla['Interés'].sum()]
+    })
+
+    st.dataframe(df_totales, use_container_width=True,hide_index=True)
 
 
