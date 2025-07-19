@@ -48,7 +48,7 @@ def calcular_tasa(num_pagos, pago, monto, precision=1e-6, max_iter=1000):
     return tasa  # Retorna el mejor valor encontrado
 
 
-st.title("Comparador de Tasas de Crédito")
+st.markdown("# :blue[Comparador de Tasas de Crédito]")
 st.markdown("""
 Ingresa los detalles de tus créditos para calcular y comparar las tasas de interés.
 La tasa se calcula usando un método numérico propio (Newton-Raphson).
@@ -64,27 +64,32 @@ with st.expander("**Créditos**", expanded=len(st.session_state.creditos)==0):
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
-            nom_credito = st.text_input("Nombre del crédito",placeholder="Crédito 1")
+            nom_credito = st.text_input("**Nombre del crédito**",placeholder="Crédito 1")
         with col3:
-            num_pagos = st.number_input("Número de pagos", min_value=0, step=1, value=0)
+            num_pagos = st.number_input("**Número de pagos**", min_value=0, step=1, value=0)
         with col4:
-            pago = st.number_input("Pago", min_value=0, value=0)
+            pago = st.number_input("**Pago**", min_value=0, value=0)
         with col2:
-            monto = st.number_input("Monto del crédito", min_value=0, value=0)
+            monto = st.number_input("**Monto del crédito**", min_value=0, value=0)
         
-        submitted = st.form_submit_button("Agregar Crédito")
+        submitted = st.form_submit_button("**Agregar Crédito**")
         
         if submitted:
 
             # Validar datos
             if nom_credito=='':
-                st.error("Indica un nombre del crédito!")
+                st.error("Indica el nombre del crédito a agregar!", icon="🚨")
             elif monto==0:
-                st.error("El monto del crédito no puede ser cero!")
+                st.error("El monto del crédito no puede ser cero!", icon="🚨")
             elif num_pagos==0:
-                st.error("El número de pagos no puede ser cero!")
+                st.error("El número de pagos no puede ser cero!", icon="🚨")
+            elif pago==0:
+                st.error("El pago ó abono no puede ser cero!", icon="🚨")
             elif pago * num_pagos <= monto:
-                st.error("El valor total de pagos debe ser mayor que el monto del crédito")
+                str_warning = f"[Explicación]: Si se multiplica el pago igual a {pago} por el número de pagos {num_pagos}\
+                    , el resultado es {pago * num_pagos}, el cual es menor al monto solicitado {monto}. Por ello hay un error."
+                st.error("El valor total de pagos debe ser mayor que el monto del crédito!", icon="🚨")
+                st.warning(str_warning)
             else:
                 # Calcular tasa
                 tasa = round(calcular_tasa(num_pagos, pago, monto),ndigits=2)
