@@ -13,6 +13,9 @@ La tasa se calcula usando un método numérico propio (Newton-Raphson).
 if 'creditos' not in st.session_state:
     st.session_state.creditos = []
 
+# if 'tab_print' not in st.session_state:
+#     st.session_state.tab_print = None
+
 for key, default in {
     "nombre_credito_input": "",
     "num_pagos_input": 0,
@@ -103,8 +106,40 @@ if len(st.session_state.creditos) > 0:
     st.bar_chart(df.set_index('Nombre crédito')['Tasa anual efectiva']*100, 
                  x_label="Créditos", y_label="Tasa efectiva anual")
 
+    #---------------------------------------------- Impresión de pdf
+    # Parámetros
+    # Título y parámetros
+    titulo = "Tabla comparativa tasas"
+    param1 = "Se debe tomar mucho en cuenta la comparativa para el caso tasa efectiva anual."
+    param2 = "Como segunda observación la comparación para la tasa nominal anual."
+    param3 = "Como último tip, observar al mes qué tasa mensual es más baja directamente."
+    parametros = {
+        "Información 1": param1,
+        "Información 2": param2,
+        "Información 3": param3
+    }
+
+    # Prepara el DataFrame como texto
+    df_pdf = df_display.copy()
+    for col in df_pdf.columns:
+        df_pdf[col] = df_pdf[col].astype(str)
+
+    # Generar PDF
+    # pdf_bytes = generar_pdf(df_pdf, titulo, parametros)
+    pdf_bytes = generar_pdf_tabla(df_pdf, titulo, parametros)
+    # Descargar
+    st.download_button(
+        label="📥 Descargar PDF",
+        data=pdf_bytes,
+        file_name="tabla_comparativa_tasas.pdf",
+        mime="application/pdf"
+    )
+
+
+
     if st.button("Limpiar todos los créditos"):
         st.session_state.creditos = []
+        # st.session_state.tab_print = None
         st.rerun()
 else:
     st.info("Agrega al menos un crédito para comenzar.")

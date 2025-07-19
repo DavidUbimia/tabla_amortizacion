@@ -67,4 +67,34 @@ if submitted:
 
     st.dataframe(df_totales, use_container_width=True,hide_index=True)
 
+    #---------------------------------------------- Impresión de pdf
+    # Parámetros
+    # Título y parámetros
+    titulo = "Tabla de amortización"
+    param1 = f"Monto crédito: ${monto_input:,.2f} — Tasa nominal anual: {tasa_input:.2f}% — Número de Pagos: {pagos_input}"
+    param2 = f"Mensualidad estimada: ${pago:,.2f}"
+
+    parametros = {
+        "Datos del crédito": param1,
+        "Resultado": param2
+    }
+
+    # Prepara el DataFrame como texto
+    df_pdf = df_display.copy()
+    for col in df_pdf.columns:
+        df_pdf[col] = df_pdf[col].astype(str)
+
+    # Generar PDF
+    # pdf_bytes = generar_pdf(df_pdf, titulo, parametros)
+    pdf_bytes = generar_pdf_tabla(df_pdf, titulo, parametros)
+    # Descargar
+    st.download_button(
+        label="📥 Descargar PDF",
+        data=pdf_bytes,
+        file_name="tabla_amortizacion.pdf",
+        mime="application/pdf"
+    )
+
+
+
 

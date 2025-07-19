@@ -1,9 +1,16 @@
 import streamlit as st
 import pandas as pd
-import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import io
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+import io
+
+from reportlab.lib.pagesizes import A4, landscape
+
 
 
 # TABLA DE AMORTIZACIÓN
@@ -74,11 +81,66 @@ def calcular_tasa(num_pagos, pago, monto, precision=1e-6, max_iter=1000):
 
 # Impresión pdf
 
+# def generar_pdf(df, titulo, parametros):
+#     buffer = io.BytesIO()
+#     with PdfPages(buffer) as pdf:
+#         fig, ax = plt.subplots(figsize=(8.27, 11.69))  # Tamaño A4
+#         ax.axis('off')
+
+#         # Construir texto
+#         text = f"{titulo}\n\n"
+#         for clave, valor in parametros.items():
+#             text += f"{clave}: {valor}\n"
+#         text += "\n"
+
+#         # Agrega la tabla como texto
+#         tabla_texto = df.to_string(index=False)
+#         ax.text(0, 1, text + tabla_texto, ha='left', va='top', fontsize=9, family='monospace', wrap=True)
+
+#         pdf.savefig(fig, bbox_inches='tight')
+#         plt.close()
+
+#     buffer.seek(0)
+#     return buffer
 
 
 
+def generar_pdf_tabla(df, titulo, parametros):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4))
+    elementos = []
+    estilos = getSampleStyleSheet()
 
+    # Título
+    elementos.append(Paragraph(f"<b>{titulo}</b>", estilos["Title"]))
+    elementos.append(Spacer(1, 12))
 
+    # Parámetros
+    for clave, valor in parametros.items():
+        elementos.append(Paragraph(f"<b>{clave}:</b> {valor}", estilos["Normal"]))
+    elementos.append(Spacer(1, 12))
+
+    # Convertimos el DataFrame a lista de listas
+    data = [df.columns.tolist()] + df.values.tolist()
+
+    # Crear tabla y aplicar estilos
+    tabla = Table(data, repeatRows=1, hAlign='LEFT')
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#4F81BD")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+        ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # Columna de Mes
+        ('GRID', (0, 0), (-1, -1), 0.25, colors.grey),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+        ('TOPPADDING', (0, 0), (-1, 0), 6),
+    ]))
+
+    elementos.append(tabla)
+    doc.build(elementos)
+    buffer.seek(0)
+    return buffer
 
 
 
