@@ -2,12 +2,11 @@ import streamlit as st
 import pandas as pd
 import streamlit as st
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import io
 
 from functions import *
-
 
 # Inicializaciones
 st.session_state.tabla=None
