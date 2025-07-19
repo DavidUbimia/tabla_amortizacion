@@ -2,48 +2,16 @@ import streamlit as st
 import pandas as pd
 import streamlit as st
 
-def calcular_pago_mensual(tasa_anual, monto, num_pagos):
-    tasa_mensual = tasa_anual / 100 / 12
-    if tasa_mensual == 0:
-        return monto / num_pagos
-    else:
-        return monto * (tasa_mensual * (1 + tasa_mensual) ** num_pagos) / ((1 + tasa_mensual) ** num_pagos - 1)
-    
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+import io
 
-def tabla_amortizacion(pago, tasa, monto, pagos):
-    tasa_mensual = tasa / 100 / 12
-    saldo = monto
-
-    tabla = [{
-            "Mes": 0,
-            "Pago": 0,
-            "Interés": 0,
-            "Abono a capital": 0,
-            "Saldo restante": round(max(saldo, 0), 2)
-        }]
-
-    for mes in range(1, pagos + 1):
-        interes = saldo * tasa_mensual
-        abono = pago - interes
-        saldo = saldo - abono
-
-        tabla.append({
-            "Mes": mes,
-            "Pago": round(pago, 2),
-            "Interés": round(interes, 2),
-            "Abono a capital": round(abono, 2),
-            "Saldo restante": round(max(saldo, 0), 2)
-        })
-
-    return pd.DataFrame(tabla)
-
-
-
+from functions import *
 
 
 # Inicializaciones
 st.session_state.tabla=None
-
+st.session_state.df_display = None
 
 st.markdown("# :blue[💰 Tabla de amortización]")
 
@@ -82,7 +50,7 @@ if submitted:
     df_display["Abono a capital"] = df_display["Abono a capital"].map("${:,.2f}".format)  # Formato monetario
     df_display["Saldo restante"] = df_display["Saldo restante"].map("${:,.2f}".format)  # Formato monetario
 
-
+    st.session_state.df_display = df_display
     st.dataframe(df_display, use_container_width=True,hide_index=True)
 
     st.write("")

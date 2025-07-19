@@ -1,30 +1,6 @@
 import streamlit as st
 import pandas as pd
-
-def calcular_tasa(num_pagos, pago, monto, precision=1e-6, max_iter=1000):
-    if monto <= 0 or pago <= 0 or num_pagos <= 0:
-        return None
-    
-    def f(tasa):
-        if tasa == 0:
-            vpn = monto - pago * num_pagos
-            derivada = -pago * num_pagos * (num_pagos + 1) / 2
-        else:
-            factor = (1 + tasa)**num_pagos
-            vpn = monto - (pago / tasa) * (1 - 1/factor)
-            derivada = (pago / tasa**2) * (1 - 1/factor) - (pago * num_pagos) / (tasa * (1 + tasa)**(num_pagos + 1))
-        return vpn, derivada
-
-    tasa = 0.1
-    for _ in range(max_iter):
-        vpn, derivada = f(tasa)
-        nueva_tasa = tasa - vpn / derivada
-        if nueva_tasa <= -1:
-            nueva_tasa = -0.9
-        if abs(nueva_tasa - tasa) < precision:
-            return nueva_tasa
-        tasa = nueva_tasa
-    return tasa
+from functions import *
 
 # Título y descripción
 st.markdown("# :blue[Comparador de Tasas de Crédito]")
