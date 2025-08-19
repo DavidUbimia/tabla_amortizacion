@@ -61,7 +61,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.markdown('<div class="footer-note">Hecho con ❤️ en Streamlit</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer-note">SciDatDav</div>', unsafe_allow_html=True)
 
 # ────────────────────────────────────────────────────────────────
 # Navegación: grupos Básicos y Avanzados
