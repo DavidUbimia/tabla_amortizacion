@@ -1,23 +1,27 @@
-# tasa_creditos.py
-import io
+# ui/pages/tasa_creditos.py
+from decimal import Decimal
 import pandas as pd
 import streamlit as st
-from functions import calcular_tasa, generar_pdf_tabla
+
+from core.rate_solver import RateSolver
+from services.export_service import ExportService
+from utils.session_state import get_state, set_state, has_state
+from utils.formatters import format_currency, format_percentage
 
 # ======================
 #   Estado / Config UI
 # ======================
-if "creditos" not in st.session_state:
-    st.session_state.creditos = []
+if not has_state("creditos"):
+    set_state("creditos", [])
 
 # Configuración SOLO para esta página (evita colisiones con otras)
-if "cfg_tasas" not in st.session_state:
-    st.session_state.cfg_tasas = {
+if not has_state("cfg_tasas"):
+    set_state("cfg_tasas", {
         "currency_symbol": "$",
         "decimals_money": 2,
         "decimals_pct": 2,
-    }
-cfg = st.session_state.cfg_tasas
+    })
+cfg = get_state("cfg_tasas")
 
 # Estado de inputs del formulario
 for key, default in {
@@ -26,16 +30,16 @@ for key, default in {
     "num_pagos_input": 0,
     "pago_input": 0.0,
 }.items():
-    if key not in st.session_state:
-        st.session_state[key] = default
+    if not has_state(key):
+        set_state(key, default)
 
 # Limpieza de formulario vía bandera
-if st.session_state.get("clear_form", False):
-    st.session_state.nombre_credito_input = ""
-    st.session_state.monto_input = 0.0
-    st.session_state.num_pagos_input = 0
-    st.session_state.pago_input = 0.0
-    st.session_state.clear_form = False
+if get_state("clear_form", False):
+    set_state("nombre_credito_input", "")
+    set_state("monto_input", 0.0)
+    set_state("num_pagos_input", 0)
+    set_state("pago_input", 0.0)
+    set_state("clear_form", False)
     st.rerun()
 
 # ======================
@@ -47,7 +51,7 @@ st.caption("Agrega créditos y compara tasa mensual, tasa anual nominal y tasa a
 # ==============
 #   Formulario
 # ==============
-with st.expander("➕ **Agregar crédito**", expanded=(len(st.session_state.creditos) == 0)):
+with st.expander("➕ **Agregar crédito**", expanded=(len(get_state("creditos")) == 0)):
     with st.form("credito_form", border=True):
         c1, c2, c3, c4 = st.columns([1.2, 1, 1, 1])
         with c1:
@@ -88,7 +92,7 @@ with st.expander("➕ **Agregar crédito**", expanded=(len(st.session_state.cred
 
     # Acciones del formulario
     if clear_btn:
-        st.session_state.clear_form = True
+        set_state("clear_form", True)
         st.rerun()
 
     if add_btn:
@@ -107,32 +111,42 @@ with st.expander("➕ **Agregar crédito**", expanded=(len(st.session_state.cred
                 f"≤ monto = {monto:,.2f}"
             )
         else:
-            tasa_m = calcular_tasa(int(num_pagos), float(pago), float(monto))
+            # Usar RateSolver para calcular la tasa
+            solver = RateSolver()
+            tasa_m = solver.solve_monthly_rate(
+                Decimal(str(monto)),
+                Decimal(str(pago)),
+                int(num_pagos)
+            )
+            
             if tasa_m is None or tasa_m < 0:
                 st.error("No se pudo calcular una tasa válida. Verifica los datos.", icon="🚨")
             else:
+                tasa_m_float = float(tasa_m)
                 fila = {
                     "Nombre crédito": nom_credito.strip(),
                     "Número de pagos": int(num_pagos),
                     "Pago": float(pago),
                     "Monto del crédito": float(monto),
-                    "Tasa mensual": float(tasa_m),                           # proporción (0.02 = 2%)
-                    "Tasa anual nominal": float(tasa_m) * 12,                # proporción
-                    "Tasa anual efectiva": (1.0 + float(tasa_m))**12 - 1.0,  # proporción
+                    "Tasa mensual": tasa_m_float,                           # proporción (0.02 = 2%)
+                    "Tasa anual nominal": tasa_m_float * 12,                # proporción
+                    "Tasa anual efectiva": (1.0 + tasa_m_float)**12 - 1.0,  # proporción
                 }
-                st.session_state.creditos.append(fila)
+                creditos = get_state("creditos")
+                creditos.append(fila)
+                set_state("creditos", creditos)
                 st.success("Crédito agregado correctamente ✅")
                 # Limpia el formulario para el siguiente registro
-                st.session_state.clear_form = True
+                set_state("clear_form", True)
                 st.rerun()
 
 # =================
 #   Contenido
 # =================
-if len(st.session_state.creditos) == 0:
+if len(get_state("creditos")) == 0:
     st.info("Agrega al menos un crédito para comenzar.")
 else:
-    df = pd.DataFrame(st.session_state.creditos)
+    df = pd.DataFrame(get_state("creditos"))
 
     # KPIs rápidos (promedios y mejor TAE)
     try:
@@ -182,17 +196,23 @@ else:
 
         df_sorted = df.sort_values(orden_col, ascending=asc).reset_index(drop=True)
 
-        # Lambdas de formateo robustas
-        money = lambda x: f"{cfg['currency_symbol']}{x:,.{cfg['decimals_money']}f}" if pd.notna(x) else ""
-        pct   = lambda x: f"{x:.{cfg['decimals_pct']}%}" if pd.notna(x) else ""
-
         # Vista formateada SOLO para presentación
         df_display = df_sorted.copy()
-        df_display["Pago"] = df_display["Pago"].map(money)
-        df_display["Monto del crédito"] = df_display["Monto del crédito"].map(money)
-        df_display["Tasa mensual"] = df_display["Tasa mensual"].map(pct)
-        df_display["Tasa anual nominal"] = df_display["Tasa anual nominal"].map(pct)
-        df_display["Tasa anual efectiva"] = df_display["Tasa anual efectiva"].map(pct)
+        df_display["Pago"] = df_display["Pago"].map(
+            lambda x: format_currency(Decimal(str(x)), cfg['currency_symbol'], cfg['decimals_money']) if pd.notna(x) else ""
+        )
+        df_display["Monto del crédito"] = df_display["Monto del crédito"].map(
+            lambda x: format_currency(Decimal(str(x)), cfg['currency_symbol'], cfg['decimals_money']) if pd.notna(x) else ""
+        )
+        df_display["Tasa mensual"] = df_display["Tasa mensual"].map(
+            lambda x: format_percentage(Decimal(str(x)), cfg['decimals_pct']) if pd.notna(x) else ""
+        )
+        df_display["Tasa anual nominal"] = df_display["Tasa anual nominal"].map(
+            lambda x: format_percentage(Decimal(str(x)), cfg['decimals_pct']) if pd.notna(x) else ""
+        )
+        df_display["Tasa anual efectiva"] = df_display["Tasa anual efectiva"].map(
+            lambda x: format_percentage(Decimal(str(x)), cfg['decimals_pct']) if pd.notna(x) else ""
+        )
 
         st.dataframe(
             df_display[
@@ -213,7 +233,7 @@ else:
         col_left, col_right = st.columns(2)
         with col_left:
             if st.button("🧹 Limpiar todos los créditos", use_container_width=True):
-                st.session_state.creditos = []
+                set_state("creditos", [])
                 st.rerun()
         with col_right:
             st.caption("Sugerencia: ordena por **TAE** para identificar la mejor opción.")
@@ -244,48 +264,49 @@ else:
     with tab_export:
         st.subheader("Descargas")
 
+        # Preparar metadata
+        metadata = {
+            "title": "Tabla comparativa de tasas",
+            "parameters": {
+                "Información 1": "Prioriza la **TAE** para comparar créditos.",
+                "Información 2": "Como segunda métrica, revisa la **tasa nominal anual**.",
+                "Información 3": "La **tasa mensual** ayuda a evaluar el impacto inmediato.",
+            },
+            "currency_symbol": cfg["currency_symbol"],
+            "decimals": cfg["decimals_money"]
+        }
+        
+        export_service = ExportService()
+        
         # CSV (numérico)
-        csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+        csv_buffer = export_service.export('csv', df, metadata)
         st.download_button(
             "CSV (datos numéricos)",
-            data=csv_bytes,
+            data=csv_buffer.getvalue(),
             file_name="comparador_tasas.csv",
             mime="text/csv",
             use_container_width=True,
         )
 
         # Excel (dos hojas: datos y vista formateada)
-        excel_buf = io.BytesIO()
-        with pd.ExcelWriter(excel_buf, engine="xlsxwriter") as writer:
-            df.to_excel(writer, sheet_name="Datos", index=False)
-            df_display.to_excel(writer, sheet_name="Vista", index=False)
-        excel_buf.seek(0)
+        excel_metadata = {**metadata, "formatted_df": df_display}
+        excel_buffer = export_service.export('excel', df, excel_metadata)
         st.download_button(
             "Excel",
-            data=excel_buf,
+            data=excel_buffer.getvalue(),
             file_name="comparador_tasas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
 
-        # PDF (usa tu utilidad)
+        # PDF
         st.divider()
         st.caption("PDF con observaciones y tabla formateada.")
-        titulo = "Tabla comparativa de tasas"
-        parametros = {
-            "Información 1": "Prioriza la **TAE** para comparar créditos.",
-            "Información 2": "Como segunda métrica, revisa la **tasa nominal anual**.",
-            "Información 3": "La **tasa mensual** ayuda a evaluar el impacto inmediato.",
-        }
-
-        df_pdf = df_display.copy().astype(str)  # texto seguro para ReportLab
-        pdf_bytes = generar_pdf_tabla(df_pdf, titulo, parametros)
-        if hasattr(pdf_bytes, "getvalue"):  # compatibilidad si regresa BytesIO
-            pdf_bytes = pdf_bytes.getvalue()
-
+        
+        pdf_buffer = export_service.export('pdf', df_display, metadata)
         st.download_button(
             "PDF",
-            data=pdf_bytes,
+            data=pdf_buffer.getvalue(),
             file_name="comparador_tasas.pdf",
             mime="application/pdf",
             use_container_width=True,
@@ -326,5 +347,5 @@ else:
             cfg["currency_symbol"] = symbol
             cfg["decimals_money"] = int(dec_m)
             cfg["decimals_pct"] = int(dec_p)
-            st.session_state.cfg_tasas = cfg  # guardar cambios en sesión
+            set_state("cfg_tasas", cfg)
             st.success("Formato actualizado.")

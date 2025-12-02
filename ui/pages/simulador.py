@@ -1,23 +1,29 @@
-# simulador.py
-import io
+# ui/pages/simulador.py
 import math
+from decimal import Decimal
 import pandas as pd
 import streamlit as st
-from functions import calcular_pago_mensual, tabla_amortizacion, generar_pdf_tabla
+
+from models.loan import Loan, LoanParameters
+from services.scenario_service import ScenarioRepository
+from services.analysis_service import sensitivity_analysis
+from services.export_service import ExportService
+from utils.session_state import get_state, set_state, has_state
+from utils.formatters import format_currency, format_percentage
 
 # ======================
 #   Estado / Config UI
 # ======================
-if "sim_cfg" not in st.session_state:
-    st.session_state.sim_cfg = {
+if not has_state("sim_cfg"):
+    set_state("sim_cfg", {
         "symbol": "$",
         "decimals_money": 2,
         "decimals_pct": 2,
-    }
-cfg = st.session_state.sim_cfg
+    })
+cfg = get_state("sim_cfg")
 
-if "escenarios_guardados" not in st.session_state:
-    st.session_state.escenarios_guardados = []  # lista de dict con los parámetros y métricas
+if not has_state("escenarios_guardados"):
+    set_state("escenarios_guardados", [])
 
 # ======================
 #   Encabezado
@@ -57,42 +63,49 @@ with st.form("base_form", border=True):
 #   Cálculo base
 # ======================
 if submit_base:
-    pago = calcular_pago_mensual(tasa_anual, monto, int(plazo_meses))
-    df_base = tabla_amortizacion(pago, tasa_anual, monto, int(plazo_meses))
-    st.session_state.sim_base = {
+    # Crear loan usando el modelo
+    params = LoanParameters(
+        principal=Decimal(str(monto)),
+        annual_rate=Decimal(str(tasa_anual)),
+        num_payments=int(plazo_meses)
+    )
+    loan = Loan(params)
+    loan.calculate()
+    
+    set_state("sim_base", {
         "monto": monto,
         "tasa_anual": tasa_anual,
         "plazo_meses": int(plazo_meses),
-        "pago": pago,
-        "tabla": df_base,
-    }
+        "loan": loan,
+    })
 
 if "sim_base" in st.session_state:
-    base = st.session_state.sim_base
-    df_tabla = base["tabla"]
-    pago = base["pago"]
+    base = get_state("sim_base")
+    loan = base["loan"]
+    metrics = loan.metrics
+    df_tabla = loan.schedule
 
-    total_pagado = float(df_tabla["Pago"].sum())
-    total_interes = float(df_tabla["Interés"].sum())
+    pago = float(metrics.monthly_payment)
+    total_pagado = float(metrics.total_paid)
+    total_interes = float(metrics.total_interest)
 
     a, b, c, d = st.columns(4)
     with a:
-        st.metric("Pago mensual", f"{cfg['symbol']}{pago:,.{cfg['decimals_money']}f}")
+        st.metric("Pago mensual", format_currency(metrics.monthly_payment, cfg['symbol'], cfg['decimals_money']))
     with b:
         st.metric("Tasa anual", f"{base['tasa_anual']:.{cfg['decimals_pct']}f}%")
     with c:
-        st.metric("Total pagado", f"{cfg['symbol']}{total_pagado:,.{cfg['decimals_money']}f}")
+        st.metric("Total pagado", format_currency(metrics.total_paid, cfg['symbol'], cfg['decimals_money']))
     with d:
-        st.metric("Total intereses", f"{cfg['symbol']}{total_interes:,.{cfg['decimals_money']}f}")
+        st.metric("Total intereses", format_currency(metrics.total_interest, cfg['symbol'], cfg['decimals_money']))
 
     st.markdown("### 🧾 Tabla de amortización (escenario base)")
     df_show = df_tabla.copy()
     df_show["Mes"] = df_show["Mes"].astype(int)
-    money_fmt = lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}"
-    df_show["Pago"] = df_show["Pago"].map(money_fmt)
-    df_show["Interés"] = df_show["Interés"].map(money_fmt)
-    df_show["Abono a capital"] = df_show["Abono a capital"].map(money_fmt)
-    df_show["Saldo restante"] = df_show["Saldo restante"].map(money_fmt)
+    df_show["Pago"] = df_show["Pago"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_show["Interés"] = df_show["Interés"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_show["Abono a capital"] = df_show["Abono a capital"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_show["Saldo restante"] = df_show["Saldo restante"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
     st.markdown("### 📈 Gráficas base")
@@ -105,43 +118,53 @@ if "sim_base" in st.session_state:
         st.area_chart(df_tabla.set_index("Mes")[["Interés", "Abono a capital"]], x_label="Mes", y_label="Monto")
 
     st.markdown("### 📥 Descargas del escenario base")
+    
+    metadata = {
+        "title": "Escenario base - Tabla de amortización",
+        "parameters": {
+            "Monto": format_currency(Decimal(str(base['monto'])), cfg['symbol'], cfg['decimals_money']),
+            "Tasa anual": f"{base['tasa_anual']:.2f}%",
+            "Plazo": f"{base['plazo_meses']} meses",
+            "Pago mensual": format_currency(metrics.monthly_payment, cfg['symbol'], cfg['decimals_money']),
+            "Total pagado": format_currency(metrics.total_paid, cfg['symbol'], cfg['decimals_money']),
+            "Intereses": format_currency(metrics.total_interest, cfg['symbol'], cfg['decimals_money'])
+        },
+        "currency_symbol": cfg['symbol'],
+        "decimals": cfg['decimals_money']
+    }
+    
+    export_service = ExportService()
+    
     # CSV
-    csv_bytes = df_tabla.to_csv(index=False).encode("utf-8")
+    csv_buffer = export_service.export('csv', df_tabla, metadata)
     st.download_button(
         "CSV",
-        data=csv_bytes,
+        data=csv_buffer.getvalue(),
         file_name="amortizacion_escenario_base.csv",
         mime="text/csv",
         use_container_width=True,
     )
+    
     # Excel
-    excel_buf = io.BytesIO()
-    with pd.ExcelWriter(excel_buf, engine="xlsxwriter") as writer:
-        df_tabla.to_excel(writer, sheet_name="Amortizacion", index=False)
-        pd.DataFrame(
-            {"Pago mensual": [pago], "Total pagado": [total_pagado], "Total intereses": [total_interes]}
-        ).to_excel(writer, sheet_name="Resumen", index=False)
-    excel_buf.seek(0)
+    excel_metadata = {**metadata, "totals_df": pd.DataFrame({
+        "Pago mensual": [pago],
+        "Total pagado": [total_pagado],
+        "Total intereses": [total_interes]
+    })}
+    excel_buffer = export_service.export('excel', df_tabla, excel_metadata)
     st.download_button(
         "Excel",
-        data=excel_buf,
+        data=excel_buffer.getvalue(),
         file_name="amortizacion_escenario_base.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
     )
+    
     # PDF
-    titulo = "Escenario base - Tabla de amortización"
-    parametros = {
-        "Crédito": f"Monto: {cfg['symbol']}{base['monto']:,.2f} — Tasa anual: {base['tasa_anual']:.2f}% — Plazo: {base['plazo_meses']} meses",
-        "Resultado": f"Pago mensual: {cfg['symbol']}{base['pago']:,.2f} | Total pagado: {cfg['symbol']}{total_pagado:,.2f} | Intereses: {cfg['symbol']}{total_interes:,.2f}",
-    }
-    df_pdf = df_show.astype(str)
-    pdf_bytes = generar_pdf_tabla(df_pdf, titulo, parametros)
-    if hasattr(pdf_bytes, "getvalue"):
-        pdf_bytes = pdf_bytes.getvalue()
+    pdf_buffer = export_service.export('pdf', df_tabla, metadata)
     st.download_button(
         "PDF",
-        data=pdf_bytes,
+        data=pdf_buffer.getvalue(),
         file_name="amortizacion_escenario_base.pdf",
         mime="application/pdf",
         use_container_width=True,
@@ -181,64 +204,60 @@ with st.form("sweep_form", border=True):
 
 if run_sweep:
     # Sanidad de rango
-    if vmax <= vmin or (param != "Monto del crédito" and vstep <= 0) or (param == "Monto del crédito" and vstep <= 0.0):
+    if vmax <= vmin or vstep <= 0:
         st.error("Revisa el rango y el paso del barrido.", icon="🚨")
     else:
-        registros = []
-        # Construir serie de valores
-        def frange(a, b, step):
-            # rango inclusivo; evita acumulación flotante
-            kmax = int(math.floor((b - a) / step)) + 1
-            return [a + i * step for i in range(kmax)]
-
-        valores = frange(vmin, vmax, vstep)
-
-        for val in valores:
-            if param == "Tasa anual nominal (%)":
-                tasa_ = val
-                monto_ = monto
-                plazo_ = int(plazo_meses)
-            elif param == "Plazo (meses)":
-                tasa_ = tasa_anual
-                monto_ = monto
-                plazo_ = int(val)
-            else:  # Monto
-                tasa_ = tasa_anual
-                monto_ = float(val)
-                plazo_ = int(plazo_meses)
-
-            pago_ = calcular_pago_mensual(tasa_, monto_, plazo_)
-            tabla_ = tabla_amortizacion(pago_, tasa_, monto_, plazo_)
-            total_pagado_ = float(tabla_["Pago"].sum())
-            total_interes_ = float(tabla_["Interés"].sum())
-
-            registros.append({
-                "Parámetro": param,
-                "Valor": val,
-                "Pago mensual": pago_,
-                "Total pagado": total_pagado_,
-                "Total intereses": total_interes_,
-                "Monto": monto_,
-                "Tasa anual": tasa_,
-                "Plazo (meses)": plazo_,
-            })
-
-        df_sweep = pd.DataFrame(registros)
-        st.session_state.df_sweep = df_sweep
+        # Usar el servicio de análisis
+        if "sim_base" in st.session_state:
+            base = get_state("sim_base")
+            
+            # Mapear el parámetro seleccionado
+            param_map = {
+                "Tasa anual nominal (%)": "annual_rate",
+                "Plazo (meses)": "num_payments",
+                "Monto del crédito": "principal"
+            }
+            
+            variable = param_map[param]
+            
+            # Crear loan base
+            base_params = LoanParameters(
+                principal=Decimal(str(base['monto'])),
+                annual_rate=Decimal(str(base['tasa_anual'])),
+                num_payments=int(base['plazo_meses'])
+            )
+            base_loan = Loan(base_params)
+            base_loan.calculate()
+            
+            # Ejecutar análisis de sensibilidad
+            df_sweep = sensitivity_analysis(
+                base_loan=base_loan,
+                variable=variable,
+                min_value=Decimal(str(vmin)),
+                max_value=Decimal(str(vmax)),
+                step=Decimal(str(vstep))
+            )
+            
+            # Agregar columna de parámetro para compatibilidad con UI existente
+            df_sweep["Parámetro"] = param
+            df_sweep["Valor"] = df_sweep[variable]
+            
+            set_state("df_sweep", df_sweep)
+        else:
+            st.error("Primero calcula el escenario base.", icon="🚨")
 
 if "df_sweep" in st.session_state:
-    df_sweep = st.session_state.df_sweep
+    df_sweep = get_state("df_sweep")
     st.markdown("### Resultados del barrido")
-    money = lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}"
-    pct = lambda x: f"{x:.{cfg['decimals_pct']}f}%"
+    
     df_view = df_sweep.copy()
-    df_view["Pago mensual"] = df_view["Pago mensual"].map(money)
-    df_view["Total pagado"] = df_view["Total pagado"].map(money)
-    df_view["Total intereses"] = df_view["Total intereses"].map(money)
-    df_view["Tasa anual"] = df_view["Tasa anual"].map(pct)
+    df_view["Pago mensual"] = df_view["monthly_payment"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_view["Total pagado"] = df_view["total_paid"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_view["Total intereses"] = df_view["total_interest"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_view["Tasa anual"] = df_view["annual_rate"].map(lambda x: f"{float(x):.{cfg['decimals_pct']}f}%")
 
     st.dataframe(
-        df_view[["Parámetro", "Valor", "Pago mensual", "Total pagado", "Total intereses", "Monto", "Tasa anual", "Plazo (meses)"]],
+        df_view[["Parámetro", "Valor", "Pago mensual", "Total pagado", "Total intereses", "Tasa anual"]],
         use_container_width=True,
         hide_index=True,
     )
@@ -247,32 +266,40 @@ if "df_sweep" in st.session_state:
     g1, g2, g3 = st.columns(3)
     with g1:
         st.markdown("**Pago mensual**")
-        st.line_chart(df_sweep.set_index("Valor")["Pago mensual"], x_label="Valor", y_label="Pago")
+        st.line_chart(df_sweep.set_index("Valor")["monthly_payment"], x_label="Valor", y_label="Pago")
     with g2:
         st.markdown("**Total pagado**")
-        st.line_chart(df_sweep.set_index("Valor")["Total pagado"], x_label="Valor", y_label="Total")
+        st.line_chart(df_sweep.set_index("Valor")["total_paid"], x_label="Valor", y_label="Total")
     with g3:
         st.markdown("**Total intereses**")
-        st.line_chart(df_sweep.set_index("Valor")["Total intereses"], x_label="Valor", y_label="Intereses")
+        st.line_chart(df_sweep.set_index("Valor")["total_interest"], x_label="Valor", y_label="Intereses")
 
     st.markdown("### 📥 Descargas del barrido")
+    
+    metadata = {
+        "title": "Barrido de escenarios",
+        "parameters": {},
+        "currency_symbol": cfg['symbol'],
+        "decimals": cfg['decimals_money']
+    }
+    
+    export_service = ExportService()
+    
     # CSV
-    csv_bytes = df_sweep.to_csv(index=False).encode("utf-8")
+    csv_buffer = export_service.export('csv', df_sweep, metadata)
     st.download_button(
         "CSV (barrido)",
-        data=csv_bytes,
+        data=csv_buffer.getvalue(),
         file_name="barrido_escenarios.csv",
         mime="text/csv",
         use_container_width=True,
     )
+    
     # Excel
-    excel_buf = io.BytesIO()
-    with pd.ExcelWriter(excel_buf, engine="xlsxwriter") as writer:
-        df_sweep.to_excel(writer, sheet_name="Barrido", index=False)
-    excel_buf.seek(0)
+    excel_buffer = export_service.export('excel', df_sweep, metadata)
     st.download_button(
         "Excel (barrido)",
-        data=excel_buf,
+        data=excel_buffer.getvalue(),
         file_name="barrido_escenarios.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
@@ -291,29 +318,32 @@ if "sim_base" in st.session_state:
         nombre = st.text_input("Nombre del escenario", placeholder="Escenario A (base)")
         guardar = st.form_submit_button("Guardar escenario", use_container_width=True)
     if guardar:
-        base = st.session_state.sim_base
-        df_tabla = base["tabla"]
-        total_pagado = float(df_tabla["Pago"].sum())
-        total_interes = float(df_tabla["Interés"].sum())
-        st.session_state.escenarios_guardados.append({
+        base = get_state("sim_base")
+        loan = base["loan"]
+        metrics = loan.metrics
+        
+        escenarios = get_state("escenarios_guardados")
+        escenarios.append({
             "Nombre": (nombre.strip() or "Escenario"),
             "Monto": float(base["monto"]),
             "Tasa anual": float(base["tasa_anual"]),
             "Plazo (meses)": int(base["plazo_meses"]),
-            "Pago mensual": float(base["pago"]),
-            "Total pagado": total_pagado,
-            "Total intereses": total_interes,
+            "Pago mensual": float(metrics.monthly_payment),
+            "Total pagado": float(metrics.total_paid),
+            "Total intereses": float(metrics.total_interest),
         })
+        set_state("escenarios_guardados", escenarios)
         st.success("Escenario guardado ✅")
         st.rerun()
 
-if len(st.session_state.escenarios_guardados) > 0:
-    df_comp = pd.DataFrame(st.session_state.escenarios_guardados)
+if len(get_state("escenarios_guardados")) > 0:
+    df_comp = pd.DataFrame(get_state("escenarios_guardados"))
+    
     # Vista formateada
     df_comp_v = df_comp.copy()
-    df_comp_v["Pago mensual"] = df_comp_v["Pago mensual"].map(lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}")
-    df_comp_v["Total pagado"] = df_comp_v["Total pagado"].map(lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}")
-    df_comp_v["Total intereses"] = df_comp_v["Total intereses"].map(lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}")
+    df_comp_v["Pago mensual"] = df_comp_v["Pago mensual"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_comp_v["Total pagado"] = df_comp_v["Total pagado"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_comp_v["Total intereses"] = df_comp_v["Total intereses"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
     df_comp_v["Tasa anual"] = df_comp_v["Tasa anual"].map(lambda x: f"{x:.{cfg['decimals_pct']}f}%")
 
     st.dataframe(
@@ -334,11 +364,12 @@ if len(st.session_state.escenarios_guardados) > 0:
     cdel1, cdel2 = st.columns(2)
     with cdel1:
         if st.button("Eliminar último escenario", use_container_width=True):
-            st.session_state.escenarios_guardados = st.session_state.escenarios_guardados[:-1]
+            escenarios = get_state("escenarios_guardados")
+            set_state("escenarios_guardados", escenarios[:-1])
             st.rerun()
     with cdel2:
         if st.button("Limpiar todos", use_container_width=True):
-            st.session_state.escenarios_guardados = []
+            set_state("escenarios_guardados", [])
             st.rerun()
 
 st.divider()
@@ -360,5 +391,5 @@ if (symbol != cfg["symbol"]) or (dec_m != cfg["decimals_money"]) or (dec_p != cf
     cfg["symbol"] = symbol
     cfg["decimals_money"] = int(dec_m)
     cfg["decimals_pct"] = int(dec_p)
-    st.session_state.sim_cfg = cfg
+    set_state("sim_cfg", cfg)
     st.success("Formato actualizado.")

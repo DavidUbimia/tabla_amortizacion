@@ -1,1 +1,6 @@
 notas.txt
+.pytest_cache/
+.venv/
+.vscode/
+_pycache_/
+*.pyc

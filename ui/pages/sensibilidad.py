@@ -1,25 +1,29 @@
-# sensibilidad.py
-import io
-import math
+# ui/pages/sensibilidad.py
+from decimal import Decimal
 import pandas as pd
 import streamlit as st
-from functions import calcular_pago_mensual, tabla_amortizacion, generar_pdf_tabla
+
+from models.loan import Loan, LoanParameters
+from services.analysis_service import sensitivity_analysis, tornado_analysis
+from services.export_service import ExportService
+from utils.session_state import get_state, set_state, has_state
+from utils.formatters import format_currency
 
 # ======================
 #   Estado / Config local
 # ======================
-if "sens_cfg" not in st.session_state:
-    st.session_state.sens_cfg = {
+if not has_state("sens_cfg"):
+    set_state("sens_cfg", {
         "symbol": "$",
         "decimals_money": 2,
         "decimals_pct": 2,
         "delta_list": [-20, -10, -5, 0, 5, 10, 20],  # % por defecto para sensibilidad local
-    }
-cfg = st.session_state.sens_cfg
+    })
+cfg = get_state("sens_cfg")
 
 # Buffer de resultados
-if "sens_result" not in st.session_state:
-    st.session_state.sens_result = {}
+if not has_state("sens_result"):
+    set_state("sens_result", {})
 
 st.markdown("# :blue[📉 Análisis de sensibilidad]")
 st.caption("Explora cómo afectan cambios en tasa, plazo o monto al pago mensual, total pagado e intereses.")
@@ -49,39 +53,47 @@ with st.form("base_form", border=True):
     run_base = st.form_submit_button("Calcular escenario base", type="primary", use_container_width=True)
 
 if run_base:
-    pago_base = calcular_pago_mensual(tasa_anual, monto, int(plazo_meses))
-    df_base = tabla_amortizacion(pago_base, tasa_anual, monto, int(plazo_meses))
-    st.session_state.sens_base = {
+    # Crear loan usando el modelo
+    params = LoanParameters(
+        principal=Decimal(str(monto)),
+        annual_rate=Decimal(str(tasa_anual)),
+        num_payments=int(plazo_meses)
+    )
+    loan = Loan(params)
+    loan.calculate()
+    
+    set_state("sens_base", {
         "monto": float(monto),
         "tasa_anual": float(tasa_anual),
         "plazo_meses": int(plazo_meses),
-        "pago": float(pago_base),
-        "tabla": df_base,
-    }
+        "loan": loan,
+    })
 
 # Mostrar base
 if "sens_base" in st.session_state:
-    base = st.session_state.sens_base
-    df_tabla = base["tabla"]
-    total_pagado = float(df_tabla["Pago"].sum())
-    total_interes = float(df_tabla["Interés"].sum())
+    base = get_state("sens_base")
+    loan = base["loan"]
+    metrics = loan.metrics
+    df_tabla = loan.schedule
+    
+    total_pagado = float(metrics.total_paid)
+    total_interes = float(metrics.total_interest)
 
     a, b, c, d = st.columns(4)
     with a:
-        st.metric("Pago mensual", f"{cfg['symbol']}{base['pago']:,.{cfg['decimals_money']}f}")
+        st.metric("Pago mensual", format_currency(metrics.monthly_payment, cfg['symbol'], cfg['decimals_money']))
     with b:
         st.metric("Tasa anual", f"{base['tasa_anual']:.{cfg['decimals_pct']}f}%")
     with c:
-        st.metric("Total pagado", f"{cfg['symbol']}{total_pagado:,.{cfg['decimals_money']}f}")
+        st.metric("Total pagado", format_currency(metrics.total_paid, cfg['symbol'], cfg['decimals_money']))
     with d:
-        st.metric("Total intereses", f"{cfg['symbol']}{total_interes:,.{cfg['decimals_money']}f}")
+        st.metric("Total intereses", format_currency(metrics.total_interest, cfg['symbol'], cfg['decimals_money']))
 
     st.markdown("### Tabla de amortización (base)")
     df_show = df_tabla.copy()
     df_show["Mes"] = df_show["Mes"].astype(int)
-    money = lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}"
     for col in ["Pago", "Interés", "Abono a capital", "Saldo restante"]:
-        df_show[col] = df_show[col].map(money)
+        df_show[col] = df_show[col].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
     st.dataframe(df_show, use_container_width=True, hide_index=True)
 
 st.divider()
@@ -108,7 +120,7 @@ with st.form("sens_local_form", border=True):
         )
     run_local = st.form_submit_button("Ejecutar sensibilidad local", type="secondary", use_container_width=True)
 
-def _parse_deltas(text: str) -> list[float]:
+def _parse_deltas(text: str) -> list:
     try:
         vals = [float(x.strip()) for x in text.split(",") if x.strip() != ""]
         if len(vals) == 0:
@@ -117,17 +129,18 @@ def _parse_deltas(text: str) -> list[float]:
     except Exception:
         return cfg["delta_list"]
 
-def _calc_metrics(tasa_anual, monto, plazo):
-    pago = calcular_pago_mensual(tasa_anual, monto, int(plazo))
-    df = tabla_amortizacion(pago, tasa_anual, monto, int(plazo))
-    total = float(df["Pago"].sum())
-    interes = float(df["Interés"].sum())
-    return pago, total, interes
-
 if run_local and "sens_base" in st.session_state:
-    base = st.session_state.sens_base
+    base = get_state("sens_base")
     deltas = _parse_deltas(deltas_text)
     registros = []
+
+    # Mapear variable
+    var_map = {
+        "Tasa anual nominal (%)": "annual_rate",
+        "Plazo (meses)": "num_payments",
+        "Monto del crédito": "principal"
+    }
+    var_key = var_map[variable]
 
     for d in deltas:
         if variable == "Tasa anual nominal (%)":
@@ -143,29 +156,40 @@ if run_local and "sens_base" in st.session_state:
             tasa_ = base["tasa_anual"]
             plazo_ = base["plazo_meses"]
 
-        pago_, total_, interes_ = _calc_metrics(tasa_, monto_, plazo_)
+        # Crear loan y calcular
+        params = LoanParameters(
+            principal=Decimal(str(monto_)),
+            annual_rate=Decimal(str(tasa_)),
+            num_payments=int(plazo_)
+        )
+        loan = Loan(params)
+        loan.calculate()
+        metrics = loan.metrics
+
         registros.append({
             "Variable": variable,
             "Delta (%)": d,
             "Monto": monto_,
             "Tasa anual": tasa_,
             "Plazo (meses)": plazo_,
-            "Pago mensual": pago_,
-            "Total pagado": total_,
-            "Total intereses": interes_,
+            "Pago mensual": float(metrics.monthly_payment),
+            "Total pagado": float(metrics.total_paid),
+            "Total intereses": float(metrics.total_interest),
         })
 
     df_local = pd.DataFrame(registros).sort_values("Delta (%)").reset_index(drop=True)
-    st.session_state.sens_result["local"] = df_local
+    sens_result = get_state("sens_result")
+    sens_result["local"] = df_local
+    set_state("sens_result", sens_result)
 
-if "local" in st.session_state.sens_result:
-    df_local = st.session_state.sens_result["local"]
+if "local" in get_state("sens_result"):
+    df_local = get_state("sens_result")["local"]
     st.markdown("#### Resultados — Sensibilidad local")
 
     df_view = df_local.copy()
-    df_view["Pago mensual"] = df_view["Pago mensual"].map(lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}")
-    df_view["Total pagado"] = df_view["Total pagado"].map(lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}")
-    df_view["Total intereses"] = df_view["Total intereses"].map(lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}")
+    df_view["Pago mensual"] = df_view["Pago mensual"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_view["Total pagado"] = df_view["Total pagado"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
+    df_view["Total intereses"] = df_view["Total intereses"].map(lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money']))
     df_view["Tasa anual"] = df_view["Tasa anual"].map(lambda x: f"{x:.{cfg['decimals_pct']}f}%")
     st.dataframe(
         df_view[["Variable", "Delta (%)", "Pago mensual", "Total pagado", "Total intereses", "Monto", "Tasa anual", "Plazo (meses)"]],
@@ -185,16 +209,24 @@ if "local" in st.session_state.sens_result:
         st.line_chart(df_local.set_index("Delta (%)")["Total intereses"], x_label="Delta (%)", y_label="Intereses")
 
     st.markdown("#### Descargas")
+    
+    metadata = {
+        "title": "Sensibilidad local",
+        "parameters": {},
+        "currency_symbol": cfg["symbol"],
+        "decimals": cfg["decimals_money"]
+    }
+    
+    export_service = ExportService()
+    
     # CSV
-    csv_bytes = df_local.to_csv(index=False).encode("utf-8")
-    st.download_button("CSV (sensibilidad local)", data=csv_bytes,
+    csv_buffer = export_service.export('csv', df_local, metadata)
+    st.download_button("CSV (sensibilidad local)", data=csv_buffer.getvalue(),
                        file_name="sens_local.csv", mime="text/csv", use_container_width=True)
+    
     # Excel
-    excel_buf = io.BytesIO()
-    with pd.ExcelWriter(excel_buf, engine="xlsxwriter") as writer:
-        df_local.to_excel(writer, sheet_name="SensLocal", index=False)
-    excel_buf.seek(0)
-    st.download_button("Excel (sensibilidad local)", data=excel_buf,
+    excel_buffer = export_service.export('excel', df_local, metadata)
+    st.download_button("Excel (sensibilidad local)", data=excel_buffer.getvalue(),
                        file_name="sens_local.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        use_container_width=True)
@@ -221,115 +253,84 @@ with st.form("tornado_form", border=True):
     run_tornado = st.form_submit_button("Generar tornado", type="secondary", use_container_width=True)
 
 if run_tornado and "sens_base" in st.session_state:
-    base = st.session_state.sens_base
-    pago_b, total_b, interes_b = _calc_metrics(base["tasa_anual"], base["monto"], base["plazo_meses"])
-    base_metric = {"Pago mensual": pago_b, "Total pagado": total_b, "Total intereses": interes_b}[metrica]
+    base = get_state("sens_base")
+    base_loan = base["loan"]
+    
+    # Mapear métrica
+    metric_map = {
+        "Pago mensual": "monthly_payment",
+        "Total pagado": "total_paid",
+        "Total intereses": "total_interest"
+    }
+    target_metric = metric_map[metrica]
+    
+    # Ejecutar análisis tornado
+    df_tornado = tornado_analysis(
+        base_loan=base_loan,
+        target_metric=target_metric,
+        delta_percent=Decimal(str(delta_tornado))
+    )
+    
+    sens_result = get_state("sens_result")
+    sens_result["tornado"] = (metrica, df_tornado)
+    set_state("sens_result", sens_result)
 
-    vars_cfg = [
-        ("Tasa anual nominal (%)", "tasa"),
-        ("Plazo (meses)", "plazo"),
-        ("Monto del crédito", "monto"),
-    ]
-
-    filas = []
-    for label, key in vars_cfg:
-        if key == "tasa":
-            plus = max(0.0, base["tasa_anual"] * (1 + delta_tornado / 100.0))
-            minus = max(0.0, base["tasa_anual"] * (1 - delta_tornado / 100.0))
-            m_plus = _calc_metrics(plus, base["monto"], base["plazo_meses"])
-            m_minus = _calc_metrics(minus, base["monto"], base["plazo_meses"])
-        elif key == "plazo":
-            plus = max(1, int(round(base["plazo_meses"] * (1 + delta_tornado / 100.0))))
-            minus = max(1, int(round(base["plazo_meses"] * (1 - delta_tornado / 100.0))))
-            m_plus = _calc_metrics(base["tasa_anual"], base["monto"], plus)
-            m_minus = _calc_metrics(base["tasa_anual"], base["monto"], minus)
-        else:
-            plus = max(0.0, base["monto"] * (1 + delta_tornado / 100.0))
-            minus = max(0.0, base["monto"] * (1 - delta_tornado / 100.0))
-            m_plus = _calc_metrics(base["tasa_anual"], plus, base["plazo_meses"])
-            m_minus = _calc_metrics(base["tasa_anual"], minus, base["plazo_meses"])
-
-        # Elegir la métrica
-        mp = {"Pago mensual": m_plus[0], "Total pagado": m_plus[1], "Total intereses": m_plus[2]}[metrica]
-        mm = {"Pago mensual": m_minus[0], "Total pagado": m_minus[1], "Total intereses": m_minus[2]}[metrica]
-
-        # Desviación relativa al base
-        delta_plus = mp - base_metric
-        delta_minus = mm - base_metric
-
-        filas.append({
-            "Variable": label,
-            "+Δ%": delta_tornado,
-            "Cambio +Δ": delta_plus,
-            "Cambio -Δ": delta_minus,
-            "Base": base_metric,
-        })
-
-    df_tornado = pd.DataFrame(filas)
-    # ordenar por impacto máximo absoluto
-    df_tornado["Impacto abs max"] = df_tornado[["Cambio +Δ", "Cambio -Δ"]].abs().max(axis=1)
-    df_tornado = df_tornado.sort_values("Impacto abs max", ascending=True).reset_index(drop=True)  # asc para hospedarlo como “tornado horizontal”
-    st.session_state.sens_result["tornado"] = (metrica, df_tornado)
-
-if "tornado" in st.session_state.sens_result:
-    metrica, df_tornado = st.session_state.sens_result["tornado"]
+if "tornado" in get_state("sens_result"):
+    metrica, df_tornado = get_state("sens_result")["tornado"]
 
     st.markdown(f"#### Tornado — impacto sobre **{metrica}**")
+    
     # Vista formateada
     df_view = df_tornado.copy()
-    if "Pago" in metrica or "Total" in metrica or "Intereses" in metrica:
-        fmt = lambda x: f"{cfg['symbol']}{x:,.{cfg['decimals_money']}f}"
-    else:
-        fmt = lambda x: f"{x:,.{cfg['decimals_money']}f}"
-    df_view["Cambio +Δ"] = df_view["Cambio +Δ"].map(fmt)
-    df_view["Cambio -Δ"] = df_view["Cambio -Δ"].map(fmt)
-    df_view["Base"] = df_view["Base"].map(fmt)
-    df_view = df_view.drop(columns=["Impacto abs max"])
+    fmt = lambda x: format_currency(Decimal(str(x)), cfg['symbol'], cfg['decimals_money'])
+    df_view["Cambio +Δ"] = df_view["delta_plus"].map(fmt)
+    df_view["Cambio -Δ"] = df_view["delta_minus"].map(fmt)
+    df_view["Base"] = df_view["base_value"].map(fmt)
+    df_view = df_view[["variable", "delta_percent", "Cambio +Δ", "Cambio -Δ", "Base"]]
+    df_view.columns = ["Variable", "+Δ%", "Cambio +Δ", "Cambio -Δ", "Base"]
+    
     st.dataframe(df_view, use_container_width=True, hide_index=True)
 
     # Gráfico tipo tornado (aproximado con barras horizontales)
     st.markdown("**Visualización del tornado (barras horizontales)**")
-    # Construir dataset para barras: dos series por variable
-    plot_df = df_tornado[["Variable", "Cambio +Δ", "Cambio -Δ"]].set_index("Variable")
-    # Streamlit no soporta nativamente barras horizontales con orientación directa,
-    # pero podemos mostrar dos columnas como barras por variable (absoluto).
-    # Para una imagen más clásica se puede usar altair, pero evitamos dependencias extra.
     gcol1, gcol2 = st.columns(2)
     with gcol1:
         st.markdown("**Cambio -Δ (izquierda)**")
-        st.bar_chart(plot_df["Cambio -Δ"].abs(), x_label="Variable", y_label="|Δ|")
+        st.bar_chart(df_tornado.set_index("variable")["delta_minus"].abs(), x_label="Variable", y_label="|Δ|")
     with gcol2:
         st.markdown("**Cambio +Δ (derecha)**")
-        st.bar_chart(plot_df["Cambio +Δ"].abs(), x_label="Variable", y_label="|Δ|")
+        st.bar_chart(df_tornado.set_index("variable")["delta_plus"].abs(), x_label="Variable", y_label="|Δ|")
 
     st.markdown("#### Descargas")
+    
+    metadata = {
+        "title": f"Tornado — impacto sobre {metrica}",
+        "parameters": {
+            "Escenario base": f"Monto: {format_currency(Decimal(str(get_state('sens_base')['monto'])), cfg['symbol'], cfg['decimals_money'])} | "
+                              f"Tasa: {get_state('sens_base')['tasa_anual']:.2f}% | "
+                              f"Plazo: {get_state('sens_base')['plazo_meses']} meses",
+        },
+        "currency_symbol": cfg["symbol"],
+        "decimals": cfg["decimals_money"]
+    }
+    
+    export_service = ExportService()
+    
     # CSV
-    csv_bytes = df_tornado.to_csv(index=False).encode("utf-8")
-    st.download_button("CSV (tornado)", data=csv_bytes,
+    csv_buffer = export_service.export('csv', df_tornado, metadata)
+    st.download_button("CSV (tornado)", data=csv_buffer.getvalue(),
                        file_name="tornado.csv", mime="text/csv", use_container_width=True)
+    
     # Excel
-    excel_buf = io.BytesIO()
-    with pd.ExcelWriter(excel_buf, engine="xlsxwriter") as writer:
-        df_tornado.to_excel(writer, sheet_name="Tornado", index=False)
-    excel_buf.seek(0)
-    st.download_button("Excel (tornado)", data=excel_buf,
+    excel_buffer = export_service.export('excel', df_tornado, metadata)
+    st.download_button("Excel (tornado)", data=excel_buffer.getvalue(),
                        file_name="tornado.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        use_container_width=True)
 
     # PDF
-    titulo = f"Tornado — impacto sobre {metrica}"
-    parametros = {
-        "Escenario base": f"Monto: {cfg['symbol']}{st.session_state.sens_base['monto']:,.2f} | "
-                          f"Tasa: {st.session_state.sens_base['tasa_anual']:.2f}% | "
-                          f"Plazo: {st.session_state.sens_base['plazo_meses']} meses",
-        "Δ% simétrico": f"{st.session_state.sens_cfg['decimals_pct']}% (configurable en formulario)",
-    }
-    df_pdf = df_view.astype(str)
-    pdf_bytes = generar_pdf_tabla(df_pdf, titulo, parametros)
-    if hasattr(pdf_bytes, "getvalue"):
-        pdf_bytes = pdf_bytes.getvalue()
-    st.download_button("PDF (tornado)", data=pdf_bytes,
+    pdf_buffer = export_service.export('pdf', df_view, metadata)
+    st.download_button("PDF (tornado)", data=pdf_buffer.getvalue(),
                        file_name="tornado.pdf", mime="application/pdf",
                        use_container_width=True)
 
@@ -352,5 +353,5 @@ if (symbol != cfg["symbol"]) or (dec_m != cfg["decimals_money"]) or (dec_p != cf
     cfg["symbol"] = symbol
     cfg["decimals_money"] = int(dec_m)
     cfg["decimals_pct"] = int(dec_p)
-    st.session_state.sens_cfg = cfg
+    set_state("sens_cfg", cfg)
     st.success("Formato actualizado.")

@@ -68,12 +68,12 @@ with st.sidebar:
 # ────────────────────────────────────────────────────────────────
 pages = {
     "Básicos": [
-        st.Page("tabla_amortizacion.py", title="🧾 Tabla amortización"),
-        st.Page("tasa_creditos.py",   title="📊 Tasa créditos"),
+        st.Page("ui/pages/tabla_amortizacion.py", title="🧾 Tabla amortización"),
+        st.Page("ui/pages/tasa_creditos.py",   title="📊 Tasa créditos"),
     ],
     "Avanzados": [
-        st.Page("simulador.py",    title="🔮 Simulador de escenarios"),
-        st.Page("sensibilidad.py", title="📉 Análisis de sensibilidad"),
+        st.Page("ui/pages/simulador.py",    title="🔮 Simulador de escenarios"),
+        st.Page("ui/pages/sensibilidad.py", title="📉 Análisis de sensibilidad"),
     ],
 }
 
