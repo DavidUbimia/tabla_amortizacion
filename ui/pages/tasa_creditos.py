@@ -282,7 +282,7 @@ else:
         csv_buffer = export_service.export('csv', df, metadata)
         st.download_button(
             "CSV (datos numéricos)",
-            data=csv_buffer.getvalue(),
+            data=csv_buffer,
             file_name="comparador_tasas.csv",
             mime="text/csv",
             use_container_width=True,
@@ -293,7 +293,7 @@ else:
         excel_buffer = export_service.export('excel', df, excel_metadata)
         st.download_button(
             "Excel",
-            data=excel_buffer.getvalue(),
+            data=excel_buffer,
             file_name="comparador_tasas.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
@@ -306,7 +306,7 @@ else:
         pdf_buffer = export_service.export('pdf', df_display, metadata)
         st.download_button(
             "PDF",
-            data=pdf_buffer.getvalue(),
+            data=pdf_buffer,
             file_name="comparador_tasas.pdf",
             mime="application/pdf",
             use_container_width=True,

@@ -56,7 +56,7 @@ if run_base:
     # Crear loan usando el modelo
     params = LoanParameters(
         principal=Decimal(str(monto)),
-        annual_rate=Decimal(str(tasa_anual)),
+        annual_rate=Decimal(str(tasa_anual)) / Decimal('100'),  # Convert percentage to decimal
         num_payments=int(plazo_meses)
     )
     loan = Loan(params)
@@ -159,7 +159,7 @@ if run_local and "sens_base" in st.session_state:
         # Crear loan y calcular
         params = LoanParameters(
             principal=Decimal(str(monto_)),
-            annual_rate=Decimal(str(tasa_)),
+            annual_rate=Decimal(str(tasa_)) / Decimal('100'),  # Convert percentage to decimal
             num_payments=int(plazo_)
         )
         loan = Loan(params)
@@ -221,12 +221,12 @@ if "local" in get_state("sens_result"):
     
     # CSV
     csv_buffer = export_service.export('csv', df_local, metadata)
-    st.download_button("CSV (sensibilidad local)", data=csv_buffer.getvalue(),
+    st.download_button("CSV (sensibilidad local)", data=csv_buffer,
                        file_name="sens_local.csv", mime="text/csv", use_container_width=True)
     
     # Excel
     excel_buffer = export_service.export('excel', df_local, metadata)
-    st.download_button("Excel (sensibilidad local)", data=excel_buffer.getvalue(),
+    st.download_button("Excel (sensibilidad local)", data=excel_buffer,
                        file_name="sens_local.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        use_container_width=True)
@@ -318,19 +318,19 @@ if "tornado" in get_state("sens_result"):
     
     # CSV
     csv_buffer = export_service.export('csv', df_tornado, metadata)
-    st.download_button("CSV (tornado)", data=csv_buffer.getvalue(),
+    st.download_button("CSV (tornado)", data=csv_buffer,
                        file_name="tornado.csv", mime="text/csv", use_container_width=True)
     
     # Excel
     excel_buffer = export_service.export('excel', df_tornado, metadata)
-    st.download_button("Excel (tornado)", data=excel_buffer.getvalue(),
+    st.download_button("Excel (tornado)", data=excel_buffer,
                        file_name="tornado.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        use_container_width=True)
 
     # PDF
     pdf_buffer = export_service.export('pdf', df_view, metadata)
-    st.download_button("PDF (tornado)", data=pdf_buffer.getvalue(),
+    st.download_button("PDF (tornado)", data=pdf_buffer,
                        file_name="tornado.pdf", mime="application/pdf",
                        use_container_width=True)
 

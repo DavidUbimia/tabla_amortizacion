@@ -66,7 +66,7 @@ if submitted:
     
     # Calculamos usando módulos core
     principal = Decimal(str(monto_input))
-    annual_rate = Decimal(str(tasa_input))
+    annual_rate = Decimal(str(tasa_input)) / Decimal('100')  # Convert percentage to decimal
     num_payments = int(pagos_input)
     
     pago = calculate_monthly_payment(principal, annual_rate, num_payments)
@@ -96,9 +96,10 @@ if get_state("tabla") is not None and get_state("pago") is not None:
         monthly_payment=Decimal(str(pago)),
         total_paid=Decimal(str(total_pagado)),
         total_interest=Decimal(str(total_interes)),
-        annual_rate=Decimal(str(tasa_input)),
-        currency_symbol=cfg['currency_symbol'],
-        decimals=cfg['decimals']
+        annual_rate=Decimal(str(tasa_input)) / Decimal('100'),  # Convert percentage to decimal
+        currency_symbol=cfg.get('currency_symbol', '$'),
+        decimals_money=cfg.get('decimals', 2),
+        decimals_percent=cfg.get('decimals', 2)
     )
 
     st.markdown("---")
@@ -184,7 +185,7 @@ if get_state("tabla") is not None and get_state("pago") is not None:
         csv_buffer = export_service.export('csv', tabla_df, metadata)
         st.download_button(
             "📥 Descargar CSV",
-            data=csv_buffer.getvalue(),
+            data=csv_buffer,
             file_name="tabla_amortizacion.csv",
             mime="text/csv",
             use_container_width=True,
@@ -194,7 +195,7 @@ if get_state("tabla") is not None and get_state("pago") is not None:
         excel_buffer = export_service.export('excel', tabla_df, {**metadata, "totals_df": df_totales})
         st.download_button(
             "📥 Descargar Excel",
-            data=excel_buffer.getvalue(),
+            data=excel_buffer,
             file_name="tabla_amortizacion.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
@@ -207,7 +208,7 @@ if get_state("tabla") is not None and get_state("pago") is not None:
         pdf_buffer = export_service.export('pdf', tabla_df, metadata)
         st.download_button(
             label="📥 Descargar PDF",
-            data=pdf_buffer.getvalue(),
+            data=pdf_buffer,
             file_name="tabla_amortizacion.pdf",
             mime="application/pdf",
             use_container_width=True,

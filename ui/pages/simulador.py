@@ -66,7 +66,7 @@ if submit_base:
     # Crear loan usando el modelo
     params = LoanParameters(
         principal=Decimal(str(monto)),
-        annual_rate=Decimal(str(tasa_anual)),
+        annual_rate=Decimal(str(tasa_anual)) / Decimal('100'),  # Convert percentage to decimal
         num_payments=int(plazo_meses)
     )
     loan = Loan(params)
@@ -139,7 +139,7 @@ if "sim_base" in st.session_state:
     csv_buffer = export_service.export('csv', df_tabla, metadata)
     st.download_button(
         "CSV",
-        data=csv_buffer.getvalue(),
+        data=csv_buffer,
         file_name="amortizacion_escenario_base.csv",
         mime="text/csv",
         use_container_width=True,
@@ -154,7 +154,7 @@ if "sim_base" in st.session_state:
     excel_buffer = export_service.export('excel', df_tabla, excel_metadata)
     st.download_button(
         "Excel",
-        data=excel_buffer.getvalue(),
+        data=excel_buffer,
         file_name="amortizacion_escenario_base.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,
@@ -164,7 +164,7 @@ if "sim_base" in st.session_state:
     pdf_buffer = export_service.export('pdf', df_tabla, metadata)
     st.download_button(
         "PDF",
-        data=pdf_buffer.getvalue(),
+        data=pdf_buffer,
         file_name="amortizacion_escenario_base.pdf",
         mime="application/pdf",
         use_container_width=True,
@@ -223,7 +223,7 @@ if run_sweep:
             # Crear loan base
             base_params = LoanParameters(
                 principal=Decimal(str(base['monto'])),
-                annual_rate=Decimal(str(base['tasa_anual'])),
+                annual_rate=Decimal(str(base['tasa_anual'])) / Decimal('100'),  # Convert percentage to decimal
                 num_payments=int(base['plazo_meses'])
             )
             base_loan = Loan(base_params)
@@ -289,7 +289,7 @@ if "df_sweep" in st.session_state:
     csv_buffer = export_service.export('csv', df_sweep, metadata)
     st.download_button(
         "CSV (barrido)",
-        data=csv_buffer.getvalue(),
+        data=csv_buffer,
         file_name="barrido_escenarios.csv",
         mime="text/csv",
         use_container_width=True,
@@ -299,7 +299,7 @@ if "df_sweep" in st.session_state:
     excel_buffer = export_service.export('excel', df_sweep, metadata)
     st.download_button(
         "Excel (barrido)",
-        data=excel_buffer.getvalue(),
+        data=excel_buffer,
         file_name="barrido_escenarios.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         use_container_width=True,

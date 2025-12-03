@@ -163,6 +163,21 @@ loan-calculator/
 | Amortization tables | `ui.components.tables.display_amortization_table()` | ✅ Extracted |
 | Loan metrics | `ui.components.metrics.display_loan_metrics()` | ✅ Extracted |
 
+## Issue Found and Fixed
+
+### Problem
+The `utils/` directory was incorrectly placed inside `ui/utils/` instead of at the root level. This caused import errors when running the Streamlit application.
+
+### Solution
+- Created `utils/` directory at the root level
+- Moved all utility files from `ui/utils/` to `utils/`:
+  - `__init__.py`
+  - `formatters.py`
+  - `helpers.py`
+  - `session_state.py`
+- Removed the `ui/utils/` directory
+- All tests continue to pass (87/87)
+
 ## Conclusion
 
 ✅ **CHECKPOINT 15 COMPLETE**
@@ -173,5 +188,16 @@ All requirements have been successfully verified:
 3. ✅ All export formats work correctly
 4. ✅ Old functions.py and duplicate page files removed
 5. ✅ All 87 tests pass
+6. ✅ Fixed utils/ directory location issue
 
 The UI refactoring is complete and the application is ready to proceed to Phase 4: New Features.
+
+## How to Run the Application
+
+Execute the following command from the project root:
+
+```bash
+streamlit run main.py
+```
+
+The application will start and be accessible at `http://localhost:8501`
